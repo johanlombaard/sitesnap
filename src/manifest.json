@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "SiteSnap",
+  "version": "1.0.0",
+  "description": "A bookmark manager that syncs through a private GitHub Gist.",
+  "permissions": ["storage", "alarms", "activeTab"],
+  "host_permissions": ["https://github.com/*", "https://api.github.com/*", "https://gist.githubusercontent.com/*"],
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "action": { "default_title": "SiteSnap" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+  },
+  "browser_specific_settings": {
+    "gecko": { "id": "sitesnap@example.com", "strict_min_version": "121.0" }
+  }
+}

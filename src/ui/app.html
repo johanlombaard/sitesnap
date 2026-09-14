@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="p1">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SiteSnap</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;600&display=swap"
+    />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="app" class="crt">
+      <header class="topbar">
+        <span class="brand">SiteSnap</span>
+        <span class="path" id="breadcrumb"></span>
+        <span class="actions">
+          <button id="sync-pill" class="sync-pill" title="Sync status (F9)">sync</button>
+          <button id="theme-toggle" class="theme-toggle" title="Toggle phosphor theme">P1</button>
+        </span>
+      </header>
+
+      <main class="panes">
+        <nav id="tree-pane" class="pane tree-pane" tabindex="0" aria-label="Folders"></nav>
+        <section id="tiles-pane" class="pane tiles-pane" tabindex="0" aria-label="Bookmarks">
+          <div class="tiles-toolbar">
+            <span id="filter-indicator"></span>
+          </div>
+          <div id="tile-grid" class="tile-grid"></div>
+        </section>
+      </main>
+
+      <footer id="statusbar" class="statusbar">
+        <span class="keys" id="keyhints"></span>
+        <span id="statusmsg"></span>
+      </footer>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-root"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "sitesnap",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A standalone bookmark manager browser extension synced through a private GitHub Gist.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\""
+  }
+}
