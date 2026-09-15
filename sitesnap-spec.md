@@ -472,11 +472,23 @@ Match its layout and behaviour. Key points:
 
 ### Theme
 
-- Single committed dark theme, monochrome. No light mode.
+- Dark themes only, monochrome per theme. No light mode.
+- A theme selector in the top bar picks the phosphor tube. Each theme is a single hue —
+  variety comes from switching tubes, not from mixing colours within one.
 - Default **P1 green**: ground `#0b1410`, text `#74d68a`, bright `#c4f0cf`, dim `#479660`,
   rules `#1d4230`.
-- Optional **P3 amber** toggle: ground `#12100a`, text `#e0a743`, bright `#f6d8a0`,
-  dim `#8d6526`, rules `#42320f`.
+- **P3 amber**: ground `#12100a`, text `#e0a743`, bright `#f6d8a0`, dim `#8d6526`,
+  rules `#42320f`.
+- **P4 white**: ground `#0d0e10`, text `#d7dade`, bright `#f8fafc`, dim `#767b82`,
+  rules `#262a30`.
+- **P11 blue**: ground `#070f16`, text `#5fb5e6`, bright `#c6ecff`, dim `#35708f`,
+  rules `#123044`.
+- **P22 red**: ground `#140909`, text `#e2585a`, bright `#ffb8b5`, dim `#8a3230`,
+  rules `#3a1414`.
+- **P24 violet**: ground `#110b17`, text `#a97ee8`, bright `#ddc7fb`, dim `#64478f`,
+  rules `#2a1c3c`.
+- **P39 cyan**: ground `#071411`, text `#4bd1bd`, bright `#b3f3e8`, dim `#2c8577`,
+  rules `#103a32`.
 - Fonts: `VT323` for terminal content, `IBM Plex Mono` for annotations. Both from Google Fonts,
   with real monospace fallback stacks.
 - **Emphasis is intensity, reverse video, and underline only.** No second hue — not for errors,
@@ -489,7 +501,7 @@ Match its layout and behaviour. Key points:
 
 1. **Browser** (primary, 120 columns) — folder tree left (30ch, indented, `+`/`-` collapse
    markers; no bookmark counts — a virtual top-level anchor wraps the real, multi-root forest of
-   folders for navigation only), bookmark tiles right (3-across grid; index letter, title, host,
+   folders for navigation only), bookmark tiles right (3-across grid; title, host,
    description). Selected folder and selected tile in reverse video. Bottom bar:
    `F2 rename · F4 edit · F6 move · F7 new folder · F8 delete · ^N new bookmark · / find · ^S sync`.
 2. **Bookmark editor** (80 col dialog) — title, address, description, folder, tags, plus read-only
@@ -567,7 +579,7 @@ Ship when all of these pass.
 - [ ] 500 bookmarks across 20 folders renders and filters without visible lag.
 - [ ] Long titles, long descriptions, and long folder names truncate or wrap — never overflow the
       pane or force horizontal page scroll.
-- [ ] Both phosphor themes are legible; no colour is used to carry meaning.
+- [ ] All phosphor themes are legible; no colour is used to carry meaning.
 
 ---
 

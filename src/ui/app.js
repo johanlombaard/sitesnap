@@ -10,6 +10,8 @@ import {
 } from '../lib/tree.js';
 import { resolveTree } from '../lib/merge.js';
 
+const THEMES = ['p1', 'p3', 'p4', 'p11', 'p22', 'p24', 'p39'];
+
 const STORAGE_KEYS = [
   Keys.STORE,
   Keys.DEVICE_ID,
@@ -72,17 +74,6 @@ function hostOf(url) {
   } catch {
     return url;
   }
-}
-
-function indexLabel(n) {
-  let s = '';
-  n++;
-  while (n > 0) {
-    n--;
-    s = String.fromCharCode(97 + (n % 26)) + s;
-    n = Math.floor(n / 26);
-  }
-  return s;
 }
 
 function fmtTime(ts) {
@@ -149,9 +140,9 @@ async function refreshFromStorage() {
   S.rateLimit = data.rateLimit || null;
   S.baseVersion = data[Keys.BASE_VERSION] || null;
   S.deviceFlow = data[Keys.DEVICE_FLOW] || null;
-  S.theme = data[Keys.THEME] || 'p1';
+  S.theme = THEMES.includes(data[Keys.THEME]) ? data[Keys.THEME] : 'p1';
   document.documentElement.dataset.theme = S.theme;
-  $('#theme-toggle').textContent = S.theme.toUpperCase();
+  $('#theme-select').value = S.theme;
 
   if (S.deviceFlow) {
     S.screen = 'auth';
@@ -312,7 +303,7 @@ function renderTileGrid(grid) {
   if (bookmarks.length === 0) {
     grid.append(el('div', { class: 'empty-state' }, S.filterText ? 'no matches' : 'empty — N to add a bookmark'));
   }
-  bookmarks.forEach((b, i) => {
+  bookmarks.forEach((b) => {
     const selected = b.id === S.selectedTileId;
     const marked = S.markedTileIds.has(b.id);
     const tile = el(
@@ -329,7 +320,7 @@ function renderTileGrid(grid) {
         ondblclick: () => openBookmark(b),
       },
       [
-        el('div', { class: 'row1' }, [el('span', { class: 'idx' }, indexLabel(i)), el('span', { class: 'title' }, b.title || b.url)]),
+        el('div', { class: 'title' }, b.title || b.url),
         el('div', { class: 'host annot' }, S.filterScope === 'global' ? `${hostOf(b.url)} · ${getFolderPath(S.store.records, b.parentId)}` : hostOf(b.url)),
         b.description ? el('div', { class: 'desc' }, b.description) : null,
       ]
@@ -535,10 +526,41 @@ function openBookmarkEditor({ id = null, parentId, prefill } = {}) {
 
 // --- new folder ---
 
+// Target defaults to the currently selected folder, but is shown and
+// changeable up front — silently nesting inside whatever happened to be
+// selected is exactly what confused users into thinking an unrelated
+// folder was "the parent" (spec bug: new folders inherited selection
+// context with no visible way to confirm or redirect it before creating).
 function openNewFolderDialog(parentId) {
   const nameInput = el('input', { type: 'text', placeholder: 'folder name' });
+  const options = flattenFolders(S.store.records);
+  let chosen = parentId ?? null;
+
+  const list = el('div', { class: 'folder-picker-list' });
+  const renderList = () => {
+    list.innerHTML = '';
+    for (const f of options) {
+      list.append(
+        el(
+          'div',
+          {
+            class: `tree-row${f.id === chosen ? ' selected' : ''}`,
+            style: `padding-left:${0.5 + f.depth * 1.4}ch`,
+            onclick: () => {
+              chosen = f.id;
+              renderList();
+            },
+          },
+          f.name
+        )
+      );
+    }
+  };
+  renderList();
+
   const body = [
-    el('div', { class: 'field' }, [el('label', {}, `New folder in ${getFolderPath(S.store.records, parentId)}`), nameInput]),
+    el('div', { class: 'field' }, [el('label', {}, 'Folder name'), nameInput]),
+    el('div', { class: 'field' }, [el('label', {}, 'Create in'), list]),
     el('div', { class: 'dlg-actions' }, [
       el('button', { onclick: () => closeModal() }, 'Cancel (Esc)'),
       el(
@@ -548,7 +570,7 @@ function openNewFolderDialog(parentId) {
           onclick: async () => {
             const name = nameInput.value.trim();
             if (!name) return toast('name is required');
-            await sendMutate('createFolder', { parentId, name });
+            await sendMutate('createFolder', { parentId: chosen, name });
             closeModal();
           },
         },
@@ -1076,9 +1098,8 @@ function currentSelectionRecords() {
 
 // ------------------------------------------------------------------ init --
 
-$('#theme-toggle').addEventListener('click', async () => {
-  const next = S.theme === 'p1' ? 'p3' : 'p1';
-  await ext.storage.local.set({ [Keys.THEME]: next });
+$('#theme-select').addEventListener('change', async (e) => {
+  await ext.storage.local.set({ [Keys.THEME]: e.target.value });
 });
 
 $('#sync-pill').addEventListener('click', () => {

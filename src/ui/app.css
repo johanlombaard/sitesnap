@@ -1,10 +1,13 @@
 /* SiteSnap — monochrome phosphor terminal theme. Spec §11.
-   Emphasis is intensity, reverse video, and underline only — never a
-   second hue, not even for errors. Hold that line everywhere in here. */
+   Each theme is a single phosphor hue; emphasis within a theme is
+   intensity, reverse video, and underline only — never a second hue,
+   not even for errors. Hold that line everywhere in here. Variety comes
+   from letting the user pick *which* tube, not from mixing colours. */
 
 :root {
   --font-term: 'VT323', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
   --font-annot: 'IBM Plex Mono', ui-monospace, 'Consolas', monospace;
+  color-scheme: dark;
 }
 
 html[data-theme='p1'] {
@@ -21,6 +24,51 @@ html[data-theme='p3'] {
   --bright: #f6d8a0;
   --dim: #8d6526;
   --rules: #42320f;
+}
+
+html[data-theme='p4'] {
+  /* paper-white monochrome monitor */
+  --ground: #0d0e10;
+  --text: #d7dade;
+  --bright: #f8fafc;
+  --dim: #767b82;
+  --rules: #262a30;
+}
+
+html[data-theme='p11'] {
+  /* oscilloscope ice blue */
+  --ground: #070f16;
+  --text: #5fb5e6;
+  --bright: #c6ecff;
+  --dim: #35708f;
+  --rules: #123044;
+}
+
+html[data-theme='p22'] {
+  /* alert red */
+  --ground: #140909;
+  --text: #e2585a;
+  --bright: #ffb8b5;
+  --dim: #8a3230;
+  --rules: #3a1414;
+}
+
+html[data-theme='p24'] {
+  /* violet */
+  --ground: #110b17;
+  --text: #a97ee8;
+  --bright: #ddc7fb;
+  --dim: #64478f;
+  --rules: #2a1c3c;
+}
+
+html[data-theme='p39'] {
+  /* long-persistence radar teal */
+  --ground: #071411;
+  --text: #4bd1bd;
+  --bright: #b3f3e8;
+  --dim: #2c8577;
+  --rules: #103a32;
 }
 
 * {
@@ -167,11 +215,23 @@ button:disabled {
   align-items: center;
 }
 
-.theme-toggle,
+.theme-select,
 .icon-btn {
   border: 1px solid var(--rules);
   background: transparent;
   padding: 0.1em 0.6em;
+}
+
+.theme-select {
+  width: auto;
+  background: var(--ground);
+}
+.theme-select:hover {
+  border-color: var(--dim);
+}
+.theme-select option {
+  background: var(--ground);
+  color: var(--text);
 }
 
 .sync-pill {
@@ -284,26 +344,10 @@ button:disabled {
   outline-offset: -4px;
 }
 
-.tile .row1 {
-  display: flex;
-  gap: 0.5ch;
-  align-items: baseline;
-}
-
-.tile .idx {
-  color: var(--dim);
-  flex: 0 0 auto;
-}
-.tile.selected .idx {
-  color: var(--ground);
-}
-
 .tile .title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  min-width: 0;
 }
 
 .tile .host {
@@ -433,6 +477,13 @@ button:disabled {
 .field select {
   width: 100%;
   padding: 0.3em 0.5ch;
+}
+.field select {
+  background: var(--ground);
+}
+.field select option {
+  background: var(--ground);
+  color: var(--text);
 }
 .field textarea {
   resize: vertical;
