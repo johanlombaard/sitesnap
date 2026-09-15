@@ -47,15 +47,18 @@ export function mergeRecords(localRecords, remoteRecords) {
  */
 export function merge(localStore, remoteStore) {
   const records = mergeRecords(localStore.records, remoteStore.records);
-  return { schema: 1, records };
+  const { records: normalized } = normalizeLegacyRoot(records);
+  return { schema: 1, records: normalized };
 }
 
 /**
  * Cycle-breaker (spec §6.3). Mutates and returns the same records array.
- * Any node that cannot walk up to `root` — cycle, orphan, or a bookmark
- * masquerading as a parent — is reparented to `__recovered` (created lazily
- * as a child of root) with a freshly clamped updatedAt so the repair
- * propagates to other devices instead of being silently re-overwritten.
+ * There is no single root record — any node may sit at the top level with
+ * `parentId: null`. Any node that cannot walk up to a top-level node — cycle,
+ * orphan, or a bookmark masquerading as a parent — is reparented to
+ * `__recovered` (created lazily as a top-level folder) with a freshly
+ * clamped updatedAt so the repair propagates to other devices instead of
+ * being silently re-overwritten.
  */
 export function resolveTree(records, { deviceId, highestSeen } = {}) {
   const live = records.filter((r) => !r.deleted);
@@ -68,10 +71,10 @@ export function resolveTree(records, { deviceId, highestSeen } = {}) {
     const now = clampedNow(highestSeen);
     rec = {
       id: '__recovered',
-      parentId: 'root',
+      parentId: null,
       kind: 'folder',
       name: '__recovered',
-      position: generateKeyBetween(lastPositionIn(records, 'root'), null),
+      position: generateKeyBetween(lastPositionIn(records, null), null),
       updatedAt: now,
       origin: deviceId || 'unknown',
       deleted: false,
@@ -83,14 +86,13 @@ export function resolveTree(records, { deviceId, highestSeen } = {}) {
   };
 
   for (const node of live) {
-    if (node.id === 'root') continue;
     const seen = new Set();
     let cur = node;
     let ok = false;
     let steps = 0;
     while (steps++ <= cap) {
       if (cur.parentId == null) {
-        ok = cur.id === 'root';
+        ok = true;
         break;
       }
       if (seen.has(cur.id)) {
@@ -111,7 +113,7 @@ export function resolveTree(records, { deviceId, highestSeen } = {}) {
     }
     if (!ok) {
       const recovered = ensureRecovered();
-      if (node.id === recovered.id) continue; // recovered itself always parents to root
+      if (node.id === recovered.id) continue; // recovered itself always sits at the top level
       node.parentId = recovered.id;
       node.position = generateKeyBetween(lastPositionIn(records, recovered.id), null);
       node.updatedAt = clampedNow(highestSeen);
@@ -119,6 +121,26 @@ export function resolveTree(records, { deviceId, highestSeen } = {}) {
     }
   }
   return records;
+}
+
+/**
+ * Migration: earlier versions had a single fixed `"root"` folder record with
+ * `parentId: null` and every top-level item parented to it. Strips that
+ * record out and reparents its former children to the top level (`null`)
+ * directly, so a store synced from an older device converges onto the
+ * multi-root model. A no-op once no `"root"` record remains.
+ */
+export function normalizeLegacyRoot(records) {
+  let changed = false;
+  for (const r of records) {
+    if (r.parentId === 'root') {
+      r.parentId = null;
+      changed = true;
+    }
+  }
+  const filtered = records.filter((r) => r.id !== 'root');
+  if (filtered.length !== records.length) changed = true;
+  return { records: filtered, changed };
 }
 
 function lastPositionIn(records, parentId) {

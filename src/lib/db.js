@@ -2,9 +2,7 @@
 import { ext } from './compat.js';
 import { generateKeyBetween } from './fracidx.js';
 import { getChildren, wouldCreateCycle } from './tree.js';
-import { clampedNow, highestUpdatedAt, resolveTree, cascadeDelete } from './merge.js';
-
-const ROOT_ID = 'root';
+import { clampedNow, highestUpdatedAt, resolveTree, cascadeDelete, normalizeLegacyRoot } from './merge.js';
 
 export const Keys = {
   STORE: 'store',
@@ -40,22 +38,7 @@ function slugify(s) {
 }
 
 function emptyStore() {
-  const now = Date.now();
-  return {
-    schema: 1,
-    records: [
-      {
-        id: ROOT_ID,
-        parentId: null,
-        kind: 'folder',
-        name: '~',
-        position: 'a0',
-        updatedAt: now,
-        origin: 'seed',
-        deleted: false,
-      },
-    ],
-  };
+  return { schema: 1, records: [] };
 }
 
 async function get(keys) {
@@ -78,7 +61,14 @@ export async function getDeviceId() {
 
 export async function loadStore() {
   const { [Keys.STORE]: store } = await get(Keys.STORE);
-  if (store && Array.isArray(store.records) && store.records.length) return store;
+  if (store && Array.isArray(store.records) && store.records.length) {
+    // Migrates stores written before the multi-root model: drops the fixed
+    // "root" folder and reparents its children to the top level.
+    const { records, changed } = normalizeLegacyRoot(store.records);
+    store.records = records;
+    if (changed) await set({ [Keys.STORE]: store });
+    return store;
+  }
   const fresh = emptyStore();
   await set({ [Keys.STORE]: fresh });
   return fresh;
@@ -152,9 +142,6 @@ export function createBookmark(store, { parentId, title, url, description = '', 
 export function updateRecord(store, id, patch, { deviceId }) {
   const record = store.records.find((r) => r.id === id && !r.deleted);
   if (!record) throw new Error(`record not found: ${id}`);
-  if (id === ROOT_ID && (patch.name !== undefined || patch.parentId !== undefined)) {
-    throw new Error('root cannot be renamed or moved');
-  }
   Object.assign(record, patch);
   if (patch.tags) record.tags = normalizeTags(patch.tags);
   record.updatedAt = clampedNow(currentHighest(store));
@@ -164,7 +151,6 @@ export function updateRecord(store, id, patch, { deviceId }) {
 }
 
 export function deleteRecord(store, id, { deviceId }) {
-  if (id === ROOT_ID) throw new Error('root cannot be deleted');
   cascadeDelete(store.records, id, { deviceId, highestSeen: currentHighest(store) });
   return { store };
 }
@@ -173,7 +159,6 @@ export function deleteRecord(store, id, { deviceId }) {
 export function moveRecord(store, id, { parentId, prevId = null, nextId = null }, { deviceId }) {
   const record = store.records.find((r) => r.id === id && !r.deleted);
   if (!record) throw new Error(`record not found: ${id}`);
-  if (id === ROOT_ID) throw new Error('root cannot be moved');
   if (record.kind === 'folder' && wouldCreateCycle(store.records, id, parentId)) {
     throw new Error('cannot move a folder into itself or a descendant');
   }

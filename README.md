@@ -78,7 +78,7 @@ npm test
 Runs `merge.js` and `fracidx.js` unit tests (pure functions, no browser
 needed) with Node's built-in test runner, including the two-machine cycle
 test from spec §6.3 (fold A into B on one machine, B into A on another,
-verify both converge with every node reaching root).
+verify both converge with every node reaching the top level).
 
 ## Keyboard reference
 

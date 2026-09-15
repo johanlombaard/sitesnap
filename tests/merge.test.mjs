@@ -8,13 +8,15 @@ import {
   cascadeDelete,
   compactTombstones,
   clampedNow,
+  normalizeLegacyRoot,
 } from '../src/lib/merge.js';
 import { generateKeyBetween } from '../src/lib/fracidx.js';
 
+// No single root record — top-level items use parentId: null.
 function record(overrides) {
   return {
     id: 'x',
-    parentId: 'root',
+    parentId: null,
     kind: 'folder',
     name: 'x',
     position: 'a0',
@@ -23,10 +25,6 @@ function record(overrides) {
     deleted: false,
     ...overrides,
   };
-}
-
-function rootRecord() {
-  return record({ id: 'root', parentId: null, name: '~' });
 }
 
 test('pickWinner: higher updatedAt wins', () => {
@@ -71,7 +69,7 @@ test('clock clamp acceptance scenario: slow device still wins after a later edit
   const bookmark = record({ id: 'bm', kind: 'bookmark', updatedAt: fastDeviceNow, origin: 'device-a', title: 'from A' });
 
   // Device B pulls, merges, and its highestSeen now reflects A's fast clock.
-  const bLocal = [rootRecord(), record({ id: 'bm', kind: 'bookmark', updatedAt: 100, origin: 'device-b', title: 'from B (old)' })];
+  const bLocal = [record({ id: 'bm', kind: 'bookmark', updatedAt: 100, origin: 'device-b', title: 'from B (old)' })];
   const bMerged = mergeRecords(bLocal, [bookmark]);
   const highestSeen = Math.max(...bMerged.map((r) => r.updatedAt));
   assert.equal(highestSeen, fastDeviceNow);
@@ -88,11 +86,10 @@ test('clock clamp acceptance scenario: slow device still wins after a later edit
 
 test('cascadeDelete: tombstones a folder and every descendant', () => {
   const records = [
-    rootRecord(),
-    record({ id: 'f1', parentId: 'root', name: 'f1' }),
+    record({ id: 'f1', parentId: null, name: 'f1' }),
     record({ id: 'f2', parentId: 'f1', name: 'f2' }),
     record({ id: 'bm1', parentId: 'f2', kind: 'bookmark', title: 'bm1' }),
-    record({ id: 'bm2', parentId: 'root', kind: 'bookmark', title: 'bm2' }),
+    record({ id: 'bm2', parentId: null, kind: 'bookmark', title: 'bm2' }),
   ];
   cascadeDelete(records, 'f1', { deviceId: 'device-a', highestSeen: 5 });
   const byId = Object.fromEntries(records.map((r) => [r.id, r]));
@@ -104,9 +101,8 @@ test('cascadeDelete: tombstones a folder and every descendant', () => {
 
 test('resolveTree: cycle test — A into B on one machine, B into A on another, both converge', () => {
   const base = () => [
-    rootRecord(),
-    record({ id: 'A', parentId: 'root', name: 'A', updatedAt: 1, origin: 'device-1' }),
-    record({ id: 'B', parentId: 'root', name: 'B', updatedAt: 1, origin: 'device-1' }),
+    record({ id: 'A', parentId: null, name: 'A', updatedAt: 1, origin: 'device-1' }),
+    record({ id: 'B', parentId: null, name: 'B', updatedAt: 1, origin: 'device-1' }),
   ];
 
   // Machine 1 (offline): moves A into B.
@@ -126,29 +122,29 @@ test('resolveTree: cycle test — A into B on one machine, B into A on another, 
   resolveTree(merged, { deviceId: 'device-1', highestSeen: 10 });
 
   const byId = Object.fromEntries(merged.map((r) => [r.id, r]));
-  const walkToRoot = (id) => {
+  const walkToTop = (id) => {
     const seen = new Set();
     let cur = byId[id];
     while (cur.parentId != null) {
-      assert.ok(!seen.has(cur.id), `cycle detected reaching root from ${id}`);
+      assert.ok(!seen.has(cur.id), `cycle detected reaching the top level from ${id}`);
       seen.add(cur.id);
       cur = byId[cur.parentId];
       assert.ok(cur, `dead parent reached from ${id}`);
     }
-    assert.equal(cur.id, 'root');
   };
-  walkToRoot('A');
-  walkToRoot('B');
+  walkToTop('A');
+  walkToTop('B');
 
   // Exactly one of A/B was displaced into __recovered (both can't keep the cyclic edge).
   const recovered = merged.find((r) => r.id === '__recovered');
   assert.ok(recovered, '__recovered folder should have been created');
+  assert.equal(recovered.parentId, null); // top-level, since there is no single root
   const displaced = [byId.A, byId.B].filter((r) => r.parentId === '__recovered');
   assert.equal(displaced.length, 1);
 });
 
 test('resolveTree: orphan (dead parent) is reparented to __recovered', () => {
-  const records = [rootRecord(), record({ id: 'orphan', parentId: 'ghost', name: 'orphan' })];
+  const records = [record({ id: 'orphan', parentId: 'ghost', name: 'orphan' })];
   resolveTree(records, { deviceId: 'device-a', highestSeen: 5 });
   const orphan = records.find((r) => r.id === 'orphan');
   assert.equal(orphan.parentId, '__recovered');
@@ -156,8 +152,7 @@ test('resolveTree: orphan (dead parent) is reparented to __recovered', () => {
 
 test('resolveTree: a bookmark posing as a parent is reparented to __recovered', () => {
   const records = [
-    rootRecord(),
-    record({ id: 'bm', parentId: 'root', kind: 'bookmark', title: 'bm' }),
+    record({ id: 'bm', parentId: null, kind: 'bookmark', title: 'bm' }),
     record({ id: 'child', parentId: 'bm', name: 'child' }),
   ];
   resolveTree(records, { deviceId: 'device-a', highestSeen: 5 });
@@ -165,11 +160,24 @@ test('resolveTree: a bookmark posing as a parent is reparented to __recovered', 
   assert.equal(child.parentId, '__recovered');
 });
 
+test('resolveTree: multiple independent top-level folders are all valid (no single root required)', () => {
+  const records = [
+    record({ id: 'f1', parentId: null, name: 'f1' }),
+    record({ id: 'f2', parentId: null, name: 'f2' }),
+    record({ id: 'bm', parentId: 'f2', kind: 'bookmark', title: 'bm' }),
+  ];
+  resolveTree(records, { deviceId: 'device-a', highestSeen: 5 });
+  const byId = Object.fromEntries(records.map((r) => [r.id, r]));
+  assert.equal(byId.f1.parentId, null);
+  assert.equal(byId.f2.parentId, null);
+  assert.equal(byId.bm.parentId, 'f2');
+  assert.ok(!records.some((r) => r.id === '__recovered'), 'nothing needed repairing');
+});
+
 test('compactTombstones: drops tombstones older than 30 days, keeps recent ones', () => {
   const now = Date.now();
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
   const records = [
-    rootRecord(),
     record({ id: 'old', deleted: true, updatedAt: now - THIRTY_DAYS - 1000 }),
     record({ id: 'recent', deleted: true, updatedAt: now - 1000 }),
     record({ id: 'live', deleted: false, updatedAt: now }),
@@ -184,14 +192,48 @@ test('compactTombstones: drops tombstones older than 30 days, keeps recent ones'
 test('merge(): whole-record LWW keeps parentId and position travelling together', () => {
   const local = {
     schema: 1,
-    records: [rootRecord(), record({ id: 'f', parentId: 'root', position: 'a0', updatedAt: 5, origin: 'device-a' })],
+    records: [record({ id: 'f', parentId: null, position: 'a0', updatedAt: 5, origin: 'device-a' })],
   };
   const remote = {
     schema: 1,
-    records: [rootRecord(), record({ id: 'f', parentId: 'root', position: generateKeyBetween('a0', null), updatedAt: 9, origin: 'device-b' })],
+    records: [record({ id: 'f', parentId: null, position: generateKeyBetween('a0', null), updatedAt: 9, origin: 'device-b' })],
   };
   const result = merge(local, remote);
   const f = result.records.find((r) => r.id === 'f');
   assert.equal(f.updatedAt, 9);
-  assert.equal(f.position, remote.records[1].position); // whole record from the winner, not a field mix
+  assert.equal(f.position, remote.records[0].position); // whole record from the winner, not a field mix
+});
+
+test('normalizeLegacyRoot: strips a legacy "root" record and reparents its children to the top level', () => {
+  const records = [
+    record({ id: 'root', parentId: null, name: '~' }),
+    record({ id: 'f1', parentId: 'root', name: 'f1' }),
+    record({ id: 'f2', parentId: 'f1', name: 'f2' }), // nested — untouched
+  ];
+  const { records: result, changed } = normalizeLegacyRoot(records);
+  assert.equal(changed, true);
+  assert.ok(!result.some((r) => r.id === 'root'));
+  assert.equal(result.find((r) => r.id === 'f1').parentId, null);
+  assert.equal(result.find((r) => r.id === 'f2').parentId, 'f1');
+});
+
+test('normalizeLegacyRoot: no-op once no "root" record remains', () => {
+  const records = [record({ id: 'f1', parentId: null, name: 'f1' })];
+  const { records: result, changed } = normalizeLegacyRoot(records);
+  assert.equal(changed, false);
+  assert.deepEqual(result, records);
+});
+
+test('merge(): also migrates a legacy "root" record arriving from an un-upgraded remote', () => {
+  const local = { schema: 1, records: [record({ id: 'f1', parentId: null, name: 'f1', updatedAt: 5 })] };
+  const remote = {
+    schema: 1,
+    records: [
+      record({ id: 'root', parentId: null, name: '~', updatedAt: 1 }),
+      record({ id: 'f2', parentId: 'root', name: 'f2', updatedAt: 5 }),
+    ],
+  };
+  const result = merge(local, remote);
+  assert.ok(!result.records.some((r) => r.id === 'root'));
+  assert.equal(result.records.find((r) => r.id === 'f2').parentId, null);
 });

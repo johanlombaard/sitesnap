@@ -4,8 +4,7 @@ import {
   getChildren,
   getFolders,
   getBookmarks,
-  buildFolderTree,
-  recursiveBookmarkCount,
+  buildFolderForest,
   wouldCreateCycle,
   liveRecords,
 } from '../lib/tree.js';
@@ -40,7 +39,7 @@ const S = {
   deviceFlow: null,
   theme: 'p1',
   screen: 'browser', // 'browser' | 'auth' | 'sync-status'
-  selectedFolderId: 'root',
+  selectedFolderId: null, // null == top level (no single root folder)
   collapsed: new Set(),
   selectedTileId: null,
   markedTileIds: new Set(),
@@ -113,26 +112,26 @@ function toast(message) {
   setTimeout(() => node.remove(), 3500);
 }
 
+// There is no single root folder: `folderId == null` means the top level.
 function getFolderPath(records, folderId) {
   const byId = new Map(liveRecords(records).map((r) => [r.id, r]));
   const parts = [];
-  let cur = byId.get(folderId);
+  let cur = folderId != null ? byId.get(folderId) : null;
   while (cur) {
-    parts.unshift(cur.id === 'root' ? '~' : cur.name);
-    cur = cur.parentId ? byId.get(cur.parentId) : null;
+    parts.unshift(cur.name);
+    cur = cur.parentId != null ? byId.get(cur.parentId) : null;
   }
-  return parts.join(' / ');
+  return parts.length ? parts.join(' / ') : '/';
 }
 
 function flattenFolders(records, { excludeIds = new Set() } = {}) {
-  const tree = buildFolderTree(records, 'root');
-  const out = [];
+  const out = [{ id: null, name: '/', depth: 0 }];
   const walk = (node, depth) => {
     if (excludeIds.has(node.record.id)) return;
-    out.push({ id: node.record.id, name: node.record.id === 'root' ? '~' : node.record.name, depth });
+    out.push({ id: node.record.id, name: node.record.name, depth });
     for (const child of node.children) walk(child, depth + 1);
   };
-  if (tree) walk(tree, 0);
+  for (const node of buildFolderForest(records)) walk(node, 1);
   return out;
 }
 
@@ -216,7 +215,7 @@ function renderTopbar() {
     crumb.textContent =
       S.filterScope === 'global' && S.filterText
         ? `// ${S.filterText}`
-        : getFolderPath(S.store.records, S.selectedFolderId) || '~';
+        : getFolderPath(S.store.records, S.selectedFolderId);
   } else {
     crumb.textContent = S.screen === 'auth' ? 'connect github' : 'sync status';
   }
@@ -229,10 +228,12 @@ function renderTopbar() {
   else pill.textContent = S.lastSyncAt ? `synced ${new Date(S.lastSyncAt).toLocaleTimeString()}` : 'sync';
 }
 
+// No wrapper row for the top level — every top-level folder renders as its
+// own depth-0 row, as a true sibling of every other top-level folder. The
+// top level itself (id: null) has no visible row; reach it by clicking the
+// breadcrumb or pressing ArrowLeft up out of a top-level folder.
 function renderTree(root) {
   S.visibleTreeIds = [];
-  const tree = buildFolderTree(S.store.records, 'root');
-  if (!tree) return;
   const walk = (node, depth) => {
     const hasChildren = node.children.length > 0;
     const collapsed = S.collapsed.has(node.record.id);
@@ -254,8 +255,7 @@ function renderTree(root) {
           },
           html: hasChildren ? (collapsed ? '+' : '-') : '&nbsp;',
         }),
-        el('span', { class: 'name' }, node.record.id === 'root' ? '~' : node.record.name),
-        el('span', { class: 'count' }, String(recursiveBookmarkCount(S.store.records, node.record.id))),
+        el('span', { class: 'name' }, node.record.name),
       ]
     );
     root.append(row);
@@ -263,7 +263,7 @@ function renderTree(root) {
       for (const child of node.children) walk(child, depth + 1);
     }
   };
-  walk(tree, 0);
+  for (const node of buildFolderForest(S.store.records)) walk(node, 0);
 }
 
 function matchesFilter(record, needle) {
@@ -473,12 +473,16 @@ function openBookmarkEditor({ id = null, parentId, prefill } = {}) {
   const tagsInput = el('input', { type: 'text', value: (initial.tags || []).join(', ') });
   const excludeIds = new Set();
   const folderOptions = flattenFolders(S.store.records, { excludeIds });
+  // <option> values are strings — the top-level ('/') option uses '' since its
+  // real id is null; folderSelect.value is converted back to null on save.
   const folderSelect = el(
     'select',
     {},
-    folderOptions.map((f) => el('option', { value: f.id, selected: f.id === initial.parentId ? 'selected' : false }, `${'—'.repeat(f.depth)} ${f.name}`))
+    folderOptions.map((f) =>
+      el('option', { value: f.id ?? '', selected: f.id === initial.parentId ? 'selected' : false }, `${'—'.repeat(f.depth)} ${f.name}`)
+    )
   );
-  folderSelect.value = initial.parentId;
+  folderSelect.value = initial.parentId ?? '';
 
   const body = [
     el('div', { class: 'field' }, [el('label', {}, 'Title'), titleInput]),
@@ -509,7 +513,7 @@ function openBookmarkEditor({ id = null, parentId, prefill } = {}) {
               return;
             }
             const tags = tagsInput.value.split(',').map((t) => t.trim()).filter(Boolean);
-            const newParentId = folderSelect.value;
+            const newParentId = folderSelect.value || null;
             if (existing) {
               await sendMutate('update', { id: existing.id, patch: { title, url, description: descInput.value, tags } });
               if (newParentId !== existing.parentId) {
@@ -605,7 +609,7 @@ function openMovePicker(ids) {
     }
   }
   const options = flattenFolders(S.store.records, { excludeIds });
-  let chosen = options[0]?.id || 'root';
+  let chosen = options[0] ? options[0].id : null;
 
   const list = el('div', { class: 'folder-picker-list' });
   const renderList = () => {
@@ -765,13 +769,12 @@ function computeConsistency(records) {
   const before = new Map(records.map((r) => [r.id, r.parentId]));
   let repaired = 0;
   for (const r of clone) if (before.has(r.id) && before.get(r.id) !== r.parentId) repaired++;
-  return repaired === 0 ? 'OK — every node reaches root' : `${repaired} node(s) would be repaired into __recovered`;
+  return repaired === 0 ? 'OK — every node reaches the top level' : `${repaired} node(s) would be repaired into __recovered`;
 }
 
 function deviceTable(records) {
   const byOrigin = new Map();
   for (const r of liveRecords(records)) {
-    if (r.origin === 'seed') continue; // synthetic root origin, not a real device
     const cur = byOrigin.get(r.origin) || 0;
     if (r.updatedAt > cur) byOrigin.set(r.origin, r.updatedAt);
   }
@@ -887,9 +890,13 @@ function importStore() {
 // -------------------------------------------------------------- keyboard --
 
 function visibleFolderNeighbors(delta) {
+  // selectedFolderId can be null (the top level, with no row of its own) —
+  // indexOf then returns -1, i.e. "just before the first row", so ArrowDown
+  // from there correctly lands on the first top-level folder.
   const idx = S.visibleTreeIds.indexOf(S.selectedFolderId);
-  const next = S.visibleTreeIds[idx + delta];
-  return next || S.selectedFolderId;
+  const nextIdx = idx + delta;
+  if (nextIdx < 0 || nextIdx >= S.visibleTreeIds.length) return S.selectedFolderId;
+  return S.visibleTreeIds[nextIdx];
 }
 
 function moveTileSelection(dx, dy) {
@@ -962,7 +969,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'F2') {
     e.preventDefault();
     const record = currentSelectionRecords()[0];
-    if (record && record.id !== 'root') openRenameDialog(record);
+    if (record) openRenameDialog(record);
     return;
   }
 
@@ -1009,7 +1016,7 @@ document.addEventListener('keydown', (e) => {
     const direction = e.key === 'ArrowUp' ? 'up' : 'down';
     if (S.focusPane === 'tiles' && S.selectedTileId) {
       sendMutate('reorder', { id: S.selectedTileId, direction });
-    } else if (S.focusPane === 'tree' && S.selectedFolderId !== 'root') {
+    } else if (S.focusPane === 'tree' && S.selectedFolderId !== null) {
       sendMutate('reorder', { id: S.selectedFolderId, direction });
     }
     return;
@@ -1029,10 +1036,14 @@ document.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') S.selectedFolderId = visibleFolderNeighbors(-1);
       else if (e.key === 'ArrowDown') S.selectedFolderId = visibleFolderNeighbors(1);
       else if (e.key === 'ArrowRight') S.collapsed.delete(S.selectedFolderId);
-      else if (e.key === 'ArrowLeft') {
+      else if (e.key === 'ArrowLeft' && S.selectedFolderId !== null) {
+        // Nothing to collapse/step up from once selection is already the top
+        // level (no row of its own, so nothing left to do).
         const record = S.store.records.find((r) => r.id === S.selectedFolderId);
         if (!S.collapsed.has(S.selectedFolderId) && hasFolderChildren(S.selectedFolderId)) S.collapsed.add(S.selectedFolderId);
-        else if (record?.parentId) S.selectedFolderId = record.parentId;
+        // record.parentId may legitimately be null (its parent is the top
+        // level) — only skip when there's no record at all.
+        else if (record) S.selectedFolderId = record.parentId;
       }
       S.selectedTileId = null;
       S.markedTileIds.clear();
@@ -1054,7 +1065,7 @@ function selectionIds() {
   if (S.focusPane === 'tiles') {
     return S.markedTileIds.size ? Array.from(S.markedTileIds) : S.selectedTileId ? [S.selectedTileId] : [];
   }
-  return S.selectedFolderId !== 'root' ? [S.selectedFolderId] : [];
+  return S.selectedFolderId !== null ? [S.selectedFolderId] : [];
 }
 
 function currentSelectionRecords() {
@@ -1073,6 +1084,13 @@ $('#theme-toggle').addEventListener('click', async () => {
 $('#sync-pill').addEventListener('click', () => {
   S.screen = 'sync-status';
   render();
+});
+
+// No anchor row in the tree represents the top level, so the breadcrumb
+// itself is the way back to it.
+$('#breadcrumb').addEventListener('click', () => {
+  if (S.screen !== 'browser' || (S.filterScope === 'global' && S.filterText)) return;
+  selectFolder(null);
 });
 
 refreshFromStorage();

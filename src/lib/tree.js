@@ -57,30 +57,19 @@ export function wouldCreateCycle(records, id, targetParentId) {
   return descendantIds(records, id).includes(targetParentId);
 }
 
-/** Recursive count of live bookmarks under `folderId` (includes nested folders). */
-export function recursiveBookmarkCount(records, folderId) {
-  let count = 0;
-  for (const id of [folderId, ...descendantIds(records, folderId)]) {
-    for (const r of getChildren(records, id)) {
-      if (r.kind === 'bookmark') count++;
-    }
+/** Builds one nested tree node (bookmarks excluded), recursing through `folder`'s descendants. */
+function buildFolderNode(records, folder) {
+  const node = { record: folder, children: [] };
+  for (const child of getFolders(records, folder.id)) {
+    node.children.push(buildFolderNode(records, child));
   }
-  return count;
+  return node;
 }
 
-/** Builds a nested tree of folders (bookmarks excluded) rooted at `rootId`. */
-export function buildFolderTree(records, rootId = 'root') {
-  const map = byId(records);
-  const root = map.get(rootId);
-  if (!root) return null;
-  const node = { record: root, children: [] };
-  const walk = (n) => {
-    for (const child of getFolders(records, n.record.id)) {
-      const childNode = { record: child, children: [] };
-      n.children.push(childNode);
-      walk(childNode);
-    }
-  };
-  walk(node);
-  return node;
+/**
+ * Builds a forest of folder trees for every top-level folder (parentId === null).
+ * There is no single root record — a store can have any number of top-level folders.
+ */
+export function buildFolderForest(records) {
+  return getFolders(records, null).map((f) => buildFolderNode(records, f));
 }

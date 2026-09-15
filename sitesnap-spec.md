@@ -70,7 +70,8 @@ type FracIdx = string;     // fractional index, see §5
 
 interface BaseRecord {
   id: Id;
-  parentId: Id | null;     // null ONLY for the root folder
+  parentId: Id | null;     // null for a top-level item — there is no single root folder;
+                           // any number of folders/bookmarks may sit at the top level
   position: FracIdx;       // order among siblings
   updatedAt: number;       // epoch ms, see §6.1 for the clock clamp
   origin: string;          // deviceId of the last writer — LWW tiebreak only
@@ -103,18 +104,27 @@ interface Store {
 
 ### Fixed records
 
-- The root folder has the literal id `"root"`, `parentId: null`, `kind: 'folder'`,
-  `name: "~"`. It can never be deleted, renamed, or moved.
+- There is **no single root folder**. Any folder or bookmark may have `parentId: null`, meaning
+  it sits at the top level as a sibling of every other top-level item. The UI's tree pane wraps
+  these in a virtual, non-editable top-level anchor for navigation only — it is never a real
+  record and is never sent to the gist.
 - A folder with id `"__recovered"` is created **lazily** by the cycle-breaker (§6.3). If it does
-  not exist when needed, create it as a child of root.
+  not exist when needed, create it as a top-level folder (`parentId: null`).
 
 ### Invariants
 
-- Every non-root record has a `parentId` naming a live folder.
-- Every record is reachable from `root` by following `parentId` upward.
+- A record either has `parentId: null` (top level) or a `parentId` naming a live folder.
+- Every record is reachable by following `parentId` upward until it reaches `null`.
 - `(parentId, position)` is unique per sibling set. Collisions are tolerated (sort is stable by
   `position` then `id`) but should not be generated.
 - A bookmark is never a parent.
+
+### Migration from the single-root model
+
+Earlier builds seeded a fixed `"root"` folder (`id: "root"`, `parentId: null`) and parented every
+top-level item to it. On load, and after every merge, strip any record with `id === "root"` and
+reparent whatever pointed at it (`parentId === "root"`) to `null` instead. This runs automatically
+and needs no user action; see `normalizeLegacyRoot` in `merge.js`.
 
 ---
 
@@ -199,7 +209,7 @@ Without this, one machine with a fast clock wins every conflict forever. Track
 ### 6.3 Cycle-breaker — required
 
 LWW on a tree can produce cycles. Move folder A into B on one machine while the other moves B into
-A; both writes are accepted and neither reaches root.
+A; both writes are accepted and neither reaches the top level.
 
 Run this after every merge, and also after any local move:
 
@@ -207,12 +217,12 @@ Run this after every merge, and also after any local move:
 resolveTree(records):
   live  := records where !deleted
   byId  := index of live by id
-  for node in live where node.id != 'root':
+  for node in live:
       seen  := {}
       cur   := node
       ok    := false
       while true:
-          if cur.parentId == null:              ok = (cur.id == 'root'); break
+          if cur.parentId == null:              ok = true; break     // reached the top level
           if seen[cur.id]:                      ok = false; break     // cycle
           seen[cur.id] = true
           parent := byId[cur.parentId]
@@ -220,7 +230,7 @@ resolveTree(records):
           if parent.kind != 'folder':           ok = false; break     // bookmark as parent
           cur := parent
       if not ok:
-          ensure '__recovered' folder exists (child of root)
+          ensure '__recovered' folder exists (top-level, parentId: null)
           node.parentId = '__recovered'
           node.position = generateKeyBetween(lastPositionIn('__recovered'), null)
           node.updatedAt = clampedNow()
@@ -233,6 +243,7 @@ Notes for the implementer:
   re-sending the broken state.
 - Both machines may repair independently. They converge because both reparent to the same
   `__recovered` folder; only `position` may differ, and LWW settles that.
+- A `parentId` of `null` is always valid — there is no single root to reach, only the top level.
 - Cap the upward walk at `live.length` iterations as a belt-and-braces guard.
 
 ---
@@ -477,8 +488,9 @@ Match its layout and behaviour. Key points:
 ### Screens
 
 1. **Browser** (primary, 120 columns) — folder tree left (30ch, indented, `+`/`-` collapse
-   markers, recursive counts right-aligned), bookmark tiles right (3-across grid; index letter,
-   title, host, description). Selected folder and selected tile in reverse video. Bottom bar:
+   markers; no bookmark counts — a virtual top-level anchor wraps the real, multi-root forest of
+   folders for navigation only), bookmark tiles right (3-across grid; index letter, title, host,
+   description). Selected folder and selected tile in reverse video. Bottom bar:
    `F2 rename · F4 edit · F6 move · F7 new folder · F8 delete · ^N new bookmark · / find · ^S sync`.
 2. **Bookmark editor** (80 col dialog) — title, address, description, folder, tags, plus read-only
    added/opened stats.
@@ -514,7 +526,8 @@ Ship when all of these pass.
 - [ ] `F6` moves a single selection, and a multi-selection marked with `Space`, into another folder.
 - [ ] A folder cannot be moved into itself or into one of its own descendants — the move dialog
       excludes those targets rather than relying on the cycle-breaker to clean up afterwards.
-- [ ] Root cannot be deleted, renamed, or moved.
+- [ ] Any number of folders and bookmarks can sit at the top level (`parentId: null`) as full
+      siblings of each other — there is no single fixed root folder to route them through.
 
 ### Sync
 
@@ -535,8 +548,8 @@ Ship when all of these pass.
 - [ ] Set one machine's clock 2 hours fast, make a change on the other; the slow machine's later
       edit still wins. (Clock clamp.)
 - [ ] **Cycle test:** offline, move folder A into B on machine 1 and B into A on machine 2. After
-      both sync, both machines show an identical tree, every node reaches root, and the displaced
-      folder sits in `__recovered`. Nothing is lost.
+      both sync, both machines show an identical tree, every node reaches the top level, and the
+      displaced folder sits in `__recovered`. Nothing is lost.
 - [ ] Tombstones older than 30 days disappear from both machines' stores.
 
 ### Auth

@@ -185,6 +185,8 @@ async function performFullSync() {
   if (dirty) await doPush();
 }
 
+const QUICK_ADD_MENU_ID = 'sitesnap-quick-add';
+
 async function ensureInit() {
   await getDeviceId();
   await loadStore();
@@ -192,6 +194,12 @@ async function ensureInit() {
   const { [Keys.DIRTY]: dirty } = await getFlags(Keys.DIRTY);
   withSyncLock(performFullSync).catch((err) => recordError(err));
   if (dirty) schedulePush(0);
+
+  // Re-registered on every startup/install rather than relying on it
+  // surviving a service-worker restart — removeAll() first avoids a
+  // duplicate-id error if it's still there from before.
+  await ext.contextMenus.removeAll();
+  ext.contextMenus.create({ id: QUICK_ADD_MENU_ID, title: 'Add page to SiteSnap', contexts: ['page'] });
 }
 
 ext.runtime.onStartup.addListener(ensureInit);
@@ -207,18 +215,29 @@ ext.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-// Toolbar icon opens app.html in a tab (never a popup — spec §2.8, §9), and
-// captures the previously-active tab's URL/title via activeTab for "add
-// this page" prefill (spec §9 notes). Deliberately just chrome.tabs.create —
-// no chrome.tabs.query — since matching-by-URL "focus the existing tab
-// instead" would need the "tabs" permission, and spec §9 is explicit that
-// activeTab-only is a deliberate minimal-permissions choice, not an oversight.
-ext.action.onClicked.addListener(async (tab) => {
-  const appUrl = ext.runtime.getURL('ui/app.html');
-  if (tab?.url && !tab.url.startsWith(appUrl)) {
-    await ext.storage.local.set({ pendingQuickAdd: { url: tab.url, title: tab.title || '' } });
-  }
-  await ext.tabs.create({ url: appUrl });
+// Opens app.html in a plain new tab (never a popup — spec §2.8, §9). Shared
+// by the toolbar icon and the "open-sitesnap" keyboard shortcut — there's no
+// chrome_url_overrides.newtab, so this is the manual way in. Deliberately
+// does NOT prefill a bookmark from the previously-active tab: that used to
+// happen on every icon click, which was surprising — quick-add is now only
+// reachable explicitly, via the "Add page to SiteSnap" context menu below.
+async function openApp() {
+  await ext.tabs.create({ url: ext.runtime.getURL('ui/app.html') });
+}
+
+ext.action.onClicked.addListener(openApp);
+
+ext.commands.onCommand.addListener((command) => {
+  if (command === 'open-sitesnap') openApp();
+});
+
+// Right-click on a page -> "Add page to SiteSnap". Captures the clicked
+// tab's URL/title via activeTab (granted by the context-menu invocation
+// itself, same as an action click) and opens the app with it prefilled.
+ext.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== QUICK_ADD_MENU_ID || !tab?.url) return;
+  await ext.storage.local.set({ pendingQuickAdd: { url: tab.url, title: tab.title || '' } });
+  await openApp();
 });
 
 const MUTATORS = {

@@ -158,6 +158,7 @@ button:disabled {
   white-space: nowrap;
   flex: 1;
   text-align: center;
+  cursor: pointer;
 }
 
 .topbar .actions {
@@ -233,18 +234,11 @@ button:disabled {
   flex: 1;
 }
 
-.tree-row .count {
-  color: var(--dim);
-  flex: 0 0 auto;
-  margin-left: 0.5ch;
-}
-
 .tree-row.selected {
   background: var(--text);
   color: var(--ground);
 }
-.tree-row.selected .marker,
-.tree-row.selected .count {
+.tree-row.selected .marker {
   color: var(--ground);
 }
 
